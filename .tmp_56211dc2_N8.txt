@@ -1,0 +1,8 @@
+N8=function(c,Y,H){Y=Y===void 0?"":Y;H=H===void 0?"":H;c=new g.Yf(c,!0);c.set("alr","yes");H&&(H=OF(56,8902,D8(1,8191,H)),c[F[10]](Y,EV(18,5578,H)));return c};
+pr=function(c){return[c.auth===void 0?"undefined":c.auth,c.isJspb===void 0?"undefined":c.isJspb,c.cttAuthInfo===void 0?"undefined":c.cttAuthInfo,c.tier===void 0?"undefined":c.tier].join("/")};
+xx=function(){this.B=this.G=this.J=0;this.j=!1};
+Cr=function(){var c=g.Wb("yt.logging.ims");c||(c=new bf,g.oJ("yt.logging.ims",c));return c};
+a8y=function(){if(typeof Worker==="function"&&FPb()&&!KPx){var c=function(H){H=H.data;if(H.op==="serializedGelBatch"){var I=B_.get(H.key);I&&(GhI(H.serializedBatch,I.client,I.resolve,I.networklessOptions,I.isIsolated,I.useVSSEndpoint,I.dangerousLogToVisitorSession,I.requestsOutstanding),B_.delete(H.key))}},Y=LPb();
+Y&&(Y.addEventListener("message",c),Y.onerror=function(){B_.clear()});
+KPx=!0}};
+vXO=function(c,Y){if(c.endpoint==="log_event"){M8(c);var H=lf(c),I=uAd(c.payload)||"",Q=rzx(I),k=200;if(Q){if(Q.enabled===!1&&!g.AK("web_payload_policy_disabled_killswitch"))return;k=$P0(Q.tier);if(k===400){e1J(c,Y);return}}XE[H]=!0;H={cttAuthInfo:H,isJspb:!1,tier:k};Cr().storePayload(H,c.payload);Azz(Y,!1

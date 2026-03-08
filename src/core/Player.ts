@@ -18,6 +18,21 @@ import packageInfo from '../../package.json' with { type: 'json' };
 
 const TAG = 'Player';
 
+function fingerprintScript(output?: string | null) {
+  const text = output || '';
+  let hash = 2166136261;
+
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return {
+    length: text.length,
+    hash: (hash >>> 0).toString(16).padStart(8, '0')
+  };
+}
+
 interface SerializablePlayer {
   playerId: string;
   signatureTimestamp: number;
@@ -93,7 +108,7 @@ export default class Player {
 
     const extractions: ExtractionConfig[] = [
       { friendlyName: sigFunctionName, match: sigMatcher },
-      { friendlyName: nFunctionName, match: nMatcher },
+      { friendlyName: nFunctionName, match: nMatcher, stopWhenReady: false },
       { friendlyName: timestampVarName, match: timestampMatcher, collectDependencies: false }
     ];
 
@@ -101,9 +116,15 @@ export default class Player {
     const jsExtractor = new JsExtractor(jsAnalyzer);
 
     const result = jsExtractor.buildScript({
-      disallowSideEffectInitializers: true,
       exportRawValues: true,
       rawValueOnly: [ timestampVarName ]
+    });
+
+    Log.debug(TAG, 'Player extraction summary:', {
+      player_id,
+      exports: result.exported,
+      has_signature_timestamp: Boolean(result.exportedRawValues?.[timestampVarName]),
+      script_fingerprint: fingerprintScript(result.output)
     });
 
     if (result.exportedRawValues && !(timestampVarName in result.exportedRawValues)) {
@@ -151,14 +172,14 @@ export default class Player {
         eval_args.sig = s;
       }
 
-      if (n) {
-        if (this_response_nsig_cache?.has(n)) {
-          const nsig = this_response_nsig_cache.get(n) as string;
-          url_components.searchParams.set('n', nsig);
-        } else {
-          eval_args.n = n;
+        if (n) {
+          if (this_response_nsig_cache?.has(n)) {
+            const nsig = this_response_nsig_cache.get(n) as string;
+            url_components.searchParams.set('n', nsig);
+          } else {
+            eval_args.n = url_components.toString();
+          }
         }
-      }
 
       if (Object.keys(eval_args).length > 0) {
         const result = await Platform.shim.eval(this.data, eval_args) as Record<string, unknown>;
@@ -183,19 +204,53 @@ export default class Player {
         }
 
         if (typeof eval_args.n === 'string') {
-          const nResult = result.n;
-          Log.info(TAG, `Transformed n from ${n} to ${nResult}.`);
+          const rawNResult = result.n;
+          const nResult = (() => {
+            if (typeof rawNResult === 'string')
+              return rawNResult;
 
-          if (typeof nResult !== 'string')
-            throw new PlayerError('Failed to decipher nsig');
+            if (
+              typeof rawNResult === 'object' &&
+              rawNResult !== null &&
+              'n' in rawNResult &&
+              typeof rawNResult.n === 'string'
+            ) {
+              return rawNResult.n;
+            }
 
-          if (nResult.startsWith('enhanced_except_')) {
-            Log.warn(TAG, `Decipher script returned an error (n=${n}):`, nResult);
-          } else if (this_response_nsig_cache) {
-            this_response_nsig_cache.set(n as string, nResult);
+            if (typeof rawNResult === 'object' && rawNResult !== null) {
+              const valueOfResult = typeof rawNResult.valueOf === 'function' ? rawNResult.valueOf() : rawNResult;
+              if (typeof valueOfResult === 'string')
+                return valueOfResult;
+
+              const stringified = typeof rawNResult.toString === 'function' ? rawNResult.toString() : '';
+              if (typeof stringified === 'string' && stringified && stringified !== '[object Object]')
+                return stringified;
+            }
+
+            return rawNResult;
+          })();
+
+          Log.info(TAG, `Transformed n from ${n} to ${typeof nResult === 'string' ? nResult : rawNResult}.`);
+
+          if (typeof nResult !== 'string') {
+            Log.warn(TAG, 'n decipher returned a non-string result.', {
+              n,
+              result_type: typeof rawNResult,
+              result_keys: Object.keys(result),
+              nested_result_keys: typeof rawNResult === 'object' && rawNResult !== null ? Object.keys(rawNResult) : [],
+              has_n_function: this.data?.exported.includes('nFunction')
+            });
+            Log.warn(TAG, `Proceeding with original n value (n=${n}).`);
+          } else {
+            if (nResult.startsWith('enhanced_except_')) {
+              Log.warn(TAG, `Decipher script returned an error (n=${n}):`, nResult);
+            } else if (this_response_nsig_cache) {
+              this_response_nsig_cache.set(n as string, nResult);
+            }
+
+            url_components.searchParams.set('n', nResult);
           }
-
-          url_components.searchParams.set('n', nResult);
         }
       }
     }
@@ -286,6 +341,6 @@ export default class Player {
   }
 
   static get LIBRARY_VERSION(): number {
-    return 14;
+    return 15;
   }
 }

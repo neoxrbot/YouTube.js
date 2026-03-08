@@ -162,7 +162,6 @@ export function memberToString(memberExpression: ESTree.Node, source: string): s
     if (!prop) return null;
 
     if (member.computed) {
-      // I just don't want to bother with nested computed nodes... :P
       const propSource = extractNodeSource(prop, source);
       if (!propSource) return null;
       segments.unshift(`[${propSource.trim()}]`);
@@ -232,7 +231,26 @@ export function createWrapperFunction(analyzer: JsAnalyzer, name: string, node: 
     node.init?.type === 'FunctionExpression' &&
     node.id.type === 'Identifier'
   ) {
+    if (looksLikeSignatureHelper(analyzer, node.init)) {
+      return generateSignatureWrapper(name, node.id.name);
+    }
+
     return generateWrapper(name, node.id.name, parseFunctionArguments(analyzer, node.init.params));
+  } else if (
+    node.type === 'ExpressionStatement' &&
+    node.expression.type === 'AssignmentExpression' &&
+    node.expression.operator === '=' &&
+    node.expression.right.type === 'FunctionExpression'
+  ) {
+    const targetName = memberToString(node.expression.left, analyzer.getSource());
+
+    if (targetName === 'g.ih') {
+      return generateNClassWrapper(name, targetName);
+    }
+
+    if (node.expression.left.type === 'Identifier' && looksLikeSignatureHelper(analyzer, node.expression.right)) {
+      return generateSignatureWrapper(name, node.expression.left.name);
+    }
   }
 }
 
@@ -250,12 +268,51 @@ function generateWrapper(functionName: string, targetFunction: string, args: str
   ].join('\n');
 }
 
-/**
- * Parses function arguments to create a string representation suitable for
- * use in our custom function calls.
- * @param analyzer - The JsAnalyzer instance to use.
- * @param args - The function arguments to parse.
- */
+function generateNClassWrapper(functionName: string, targetClass: string): string {
+  return [
+    `${indent}function ${functionName}(input) {`,
+    `${indent}${indent}let url = input;`,
+    `${indent}${indent}if (typeof input !== 'string' || (!input.startsWith('http://') && !input.startsWith('https://'))) {`,
+    `${indent}${indent}${indent}url = 'https://www.youtube.com/videoplayback?n=' + encodeURIComponent(String(input));`,
+    `${indent}${indent}}`,
+    `${indent}${indent}const helper = new ${targetClass}(url, true);`,
+    `${indent}${indent}const direct = helper.get('n');`,
+    `${indent}${indent}if (direct != null) return direct;`,
+    `${indent}${indent}const serialized = helper.toString();`,
+    `${indent}${indent}if (serialized) {`,
+    `${indent}${indent}${indent}const fallback = new URLSearchParams(serialized).get('n');`,
+    `${indent}${indent}${indent}if (fallback != null) return fallback;`,
+    `${indent}${indent}}`,
+    `${indent}${indent}return null;`,
+    `${indent}}`
+  ].join('\n');
+}
+
+function generateSignatureWrapper(functionName: string, targetFunction: string): string {
+  return [
+    `${indent}function ${functionName}(input) {`,
+    `${indent}${indent}const helper = ${targetFunction}('https://www.youtube.com/videoplayback', 'signature', String(input));`,
+    `${indent}${indent}const direct = helper?.get?.('signature');`,
+    `${indent}${indent}if (direct != null) return direct;`,
+    `${indent}${indent}const serialized = helper?.toString?.();`,
+    `${indent}${indent}if (serialized) {`,
+    `${indent}${indent}${indent}const fallback = new URLSearchParams(serialized).get('signature');`,
+    `${indent}${indent}${indent}if (fallback != null) return fallback;`,
+    `${indent}${indent}}`,
+    `${indent}${indent}return null;`,
+    `${indent}}`
+  ].join('\n');
+}
+
+function looksLikeSignatureHelper(analyzer: JsAnalyzer, node: ESTree.FunctionExpression): boolean {
+  const source = analyzer.getSource();
+  const bodySource = extractNodeSource(node.body, source) || '';
+
+  return bodySource.includes('new g.ih') &&
+    bodySource.includes('M_(') &&
+    bodySource.includes('Zk(') &&
+    bodySource.includes('sp(');
+}
 function parseFunctionArguments(analyzer: JsAnalyzer, args: ESTree.Node[]) {
   const params: string[] = [];
 
@@ -270,3 +327,4 @@ function parseFunctionArguments(analyzer: JsAnalyzer, args: ESTree.Node[]) {
 
   return params.join(', ');
 }
+

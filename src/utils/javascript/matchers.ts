@@ -1,65 +1,89 @@
 import type { ESTree } from 'meriyah';
-import { WALK_STOP, walkAst } from './helpers.js';
+import { WALK_STOP, walkAst, memberToString } from './helpers.js';
+
+function isSignatureHelperFunction(node: ESTree.FunctionExpression): boolean {
+  if (node.params.length !== 3 || !node.body || node.body.type !== 'BlockStatement') {
+    return false;
+  }
+
+  let hasUrlHelper = false;
+  let hasM = false;
+  let hasZk = false;
+  let hasSp = false;
+
+  walkAst(node.body, (innerNode) => {
+    if (innerNode.type === 'NewExpression' && innerNode.callee.type === 'MemberExpression') {
+      hasUrlHelper ||= memberToString(innerNode.callee, '') === 'g.ih';
+    } else if (innerNode.type === 'CallExpression' && innerNode.callee.type === 'Identifier') {
+      hasM ||= innerNode.callee.name === 'M_';
+      hasZk ||= innerNode.callee.name === 'Zk';
+      hasSp ||= innerNode.callee.name === 'sp';
+    }
+
+    if (hasUrlHelper && hasM && hasZk && hasSp) {
+      return WALK_STOP;
+    }
+  });
+
+  return hasUrlHelper && hasM && hasZk && hasSp;
+}
 
 export function sigMatcher(node: ESTree.Node) {
-  if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier') {
-    const idNode = node.id;
-    const initNode = node.init;
+  if (
+    node.type === 'VariableDeclarator' &&
+    node.id.type === 'Identifier' &&
+    node.init?.type === 'FunctionExpression' &&
+    isSignatureHelperFunction(node.init)
+  ) {
+    return node;
+  }
 
-    if (idNode.type === 'Identifier' && initNode?.type === 'FunctionExpression' && initNode.params.length === 3) {
-      const functionInitNode = initNode.body;
-      if (!functionInitNode || functionInitNode.type !== 'BlockStatement') return false;
-
-      for (const st of functionInitNode.body) {
-        if (st?.type === 'ExpressionStatement') {
-          const expression = st.expression;
-          if (
-            expression.type === 'LogicalExpression' &&
-            expression.operator === '&&' &&
-            expression.left.type === 'Identifier' &&
-            expression.right.type === 'SequenceExpression'
-          ) {
-            const firstExp = expression.right.expressions[0];
-            if (
-              firstExp.type === 'AssignmentExpression' &&
-              firstExp.operator === '=' &&
-              firstExp.left.type === 'Identifier' &&
-              firstExp.right.type === 'CallExpression' &&
-              firstExp.right.callee.type === 'Identifier'
-            ) {
-              const rightArguments = firstExp.right.arguments;
-              // sigFn(64, decodeURIComponent(sig))
-              if (rightArguments.length >= 1) {
-                const callExpression = rightArguments.find((exp) => exp.type === 'CallExpression');
-                if (
-                  callExpression?.type === 'CallExpression' &&
-                  callExpression?.callee.type === 'Identifier' &&
-                  callExpression.callee.name === 'decodeURIComponent' &&
-                  callExpression.arguments[0].type === 'Identifier'
-                ) {
-                  return firstExp.right;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+  if (
+    node.type === 'ExpressionStatement' &&
+    node.expression.type === 'AssignmentExpression' &&
+    node.expression.operator === '=' &&
+    node.expression.left.type === 'Identifier' &&
+    node.expression.right.type === 'FunctionExpression' &&
+    isSignatureHelperFunction(node.expression.right)
+  ) {
+    return node;
   }
 
   return false;
 }
 
 export function nMatcher(node: ESTree.Node) {
-  if (node.type !== 'VariableDeclarator')
+  if (node.type === 'VariableDeclarator') {
+    if (
+      node.id.type === 'Identifier' &&
+      node.init?.type === 'ArrayExpression' &&
+      node.init.elements[0]?.type === 'Identifier'
+    ) {
+      return node.init.elements[0];
+    }
+
     return false;
+  }
 
   if (
-    node.id.type === 'Identifier' &&
-    node.init?.type === 'ArrayExpression' &&
-    node.init.elements[0]?.type === 'Identifier'
+    node.type === 'ExpressionStatement' &&
+    node.expression.type === 'AssignmentExpression' &&
+    node.expression.operator === '=' &&
+    node.expression.left.type === 'MemberExpression' &&
+    node.expression.right.type === 'FunctionExpression'
   ) {
-    return node.init.elements[0];
+    const object = node.expression.left.object;
+    const property = node.expression.left.property;
+
+    if (
+      !node.expression.left.computed &&
+      object.type === 'Identifier' &&
+      object.name === 'g' &&
+      property.type === 'Identifier' &&
+      property.name === 'ih'
+    ) {
+      return node.expression.left;
+    }
   }
 
   return false;

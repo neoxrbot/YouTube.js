@@ -244,7 +244,7 @@ export function createWrapperFunction(analyzer: JsAnalyzer, name: string, node: 
   ) {
     const targetName = memberToString(node.expression.left, analyzer.getSource());
 
-    if (targetName === 'g.ih') {
+    if (name === 'nFunction' && targetName?.startsWith('g.')) {
       return generateNClassWrapper(name, targetName);
     }
 
@@ -252,6 +252,15 @@ export function createWrapperFunction(analyzer: JsAnalyzer, name: string, node: 
       return generateSignatureWrapper(name, node.expression.left.name);
     }
   }
+}
+
+function isTruthyBooleanNode(node: ESTree.Node | null | undefined): boolean {
+  return (node?.type === 'Literal' && node.value === true) || (
+    node?.type === 'UnaryExpression' &&
+    node.operator === '!' &&
+    node.argument.type === 'Literal' &&
+    node.argument.value === 0
+  );
 }
 
 /**
@@ -305,13 +314,64 @@ function generateSignatureWrapper(functionName: string, targetFunction: string):
 }
 
 function looksLikeSignatureHelper(analyzer: JsAnalyzer, node: ESTree.FunctionExpression): boolean {
-  const source = analyzer.getSource();
-  const bodySource = extractNodeSource(node.body, source) || '';
+  if (node.params.length !== 3 || !node.body) {
+    return false;
+  }
 
-  return bodySource.includes('new g.ih') &&
-    bodySource.includes('M_(') &&
-    bodySource.includes('Zk(') &&
-    bodySource.includes('sp(');
+  const helperName = node.params[0]?.type === 'Identifier' ? node.params[0].name : null;
+  const signatureParam = node.params[1]?.type === 'Identifier' ? node.params[1].name : null;
+
+  if (!helperName || !signatureParam) {
+    return false;
+  }
+
+  let hasUrlHelperConstructor = false;
+  let hasAlrSet = false;
+  let hasSignatureWrite = false;
+  let returnsHelper = false;
+
+  walkAst(node.body, (innerNode) => {
+    if (
+      innerNode.type === 'NewExpression' &&
+      innerNode.callee.type === 'MemberExpression' &&
+      innerNode.arguments.length >= 2 &&
+      innerNode.arguments[0]?.type === 'Identifier' &&
+      innerNode.arguments[0].name === helperName &&
+      isTruthyBooleanNode(innerNode.arguments[1])
+    ) {
+      const calleeName = memberToString(innerNode.callee, '');
+      hasUrlHelperConstructor ||= typeof calleeName === 'string' && calleeName.startsWith('g.');
+    } else if (
+      innerNode.type === 'CallExpression' &&
+      innerNode.callee.type === 'MemberExpression' &&
+      innerNode.callee.object.type === 'Identifier' &&
+      innerNode.callee.object.name === helperName
+    ) {
+      if (
+        innerNode.arguments.length >= 2 &&
+        innerNode.arguments[0]?.type === 'Literal' &&
+        innerNode.arguments[0].value === 'alr' &&
+        innerNode.arguments[1]?.type === 'Literal' &&
+        innerNode.arguments[1].value === 'yes'
+      ) {
+        hasAlrSet = true;
+      } else if (
+        innerNode.arguments.length >= 2 &&
+        innerNode.arguments[0]?.type === 'Identifier' &&
+        innerNode.arguments[0].name === signatureParam
+      ) {
+        hasSignatureWrite = true;
+      }
+    } else if (
+      innerNode.type === 'ReturnStatement' &&
+      innerNode.argument?.type === 'Identifier' &&
+      innerNode.argument.name === helperName
+    ) {
+      returnsHelper = true;
+    }
+  });
+
+  return hasUrlHelperConstructor && hasAlrSet && hasSignatureWrite && returnsHelper;
 }
 function parseFunctionArguments(analyzer: JsAnalyzer, args: ESTree.Node[]) {
   const params: string[] = [];

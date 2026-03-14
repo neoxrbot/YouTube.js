@@ -112,6 +112,7 @@ export const CLIENT_NAME_IDS = {
   WEB_KIDS: '76',
   WEB_REMIX: '67',
   ANDROID: '3',
+  ANDROID_VR: '28',
   ANDROID_CREATOR: '14',
   ANDROID_MUSIC: '21',
   TVHTML5: '7',
